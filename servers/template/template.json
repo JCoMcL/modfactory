@@ -1,0 +1,11 @@
+{
+  "type": "vanilla",
+  "minecraft_version": "1.20.1",
+  "java_home": "/opt/openjdk-bin-17",
+  "level_name": "world",
+  "server_jar": "server.jar",
+  "memory": "2G",
+  "initial_enabled_packs": "vanilla",
+  "start": "exec \"{java}\" -Xms{memory} -Xmx{memory} -jar \"{server_jar}\" nogui",
+  "rcon": false
+}
