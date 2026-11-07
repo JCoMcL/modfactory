@@ -1,0 +1,21 @@
+plugins {
+    id 'net.fabricmc.fabric-loom-remap' version "${loom_version}"
+}
+
+def minecraftVersion = providers.gradleProperty('minecraft_version').getOrElse('1.20.1')
+
+dependencies {
+    minecraft "com.mojang:minecraft:${minecraftVersion}"
+    mappings loom.officialMojangMappings()
+}
+
+// Resolving compileClasspath triggers Loom's remap step and gives us the
+// merged, officially-mapped Minecraft jar. The generate-source.sh script uses
+// this path and decompiles it directly with Vineflower.
+tasks.register('printMinecraftJar') {
+    doLast {
+        configurations.compileClasspath.files
+            .findAll { it.name.startsWith('minecraft-merged-') && it.name.endsWith('.jar') }
+            .each { println "MINECRAFT_JAR=${it.absolutePath}" }
+    }
+}
