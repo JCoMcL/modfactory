@@ -1,0 +1,3 @@
+[submodule "fabric-template"]
+	path = fabric-template
+	url = https://github.com/FabricMC/fabric-example-mod.git
