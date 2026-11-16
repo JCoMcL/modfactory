@@ -1,7 +1,18 @@
 #!/usr/bin/env bash
 set -eo pipefail
 
-cd "$(dirname "$(which $0)")"
+err() {
+	echo "[0m[31m$@[0m" >&2
+}
+warn() {
+	echo "[0m[34m$@[0m" >&2
+}
+die() {
+	err $@
+	exit 1
+}
+
+cd "$(dirname "$(which "$0")")"
 
 jvm_flags() {
 	# Aikars flags
@@ -13,7 +24,9 @@ export OPENJDK_VERSION=${OPENJDK_VERSION:-17}
 export MEM=${MEM:-2G}
 export JAR=${SERVER_JAR:-server.jar}
 
-JAVA=/opt/openjdk-bin-$OPENJDK_VERSION/bin/java
+exec_java() {
+	exec /opt/openjdk-bin-$OPENJDK_VERSION/bin/java $@
+}
 
 add_java_args() {
 	export JAVA_ARGS="$JAVA_ARGS $@"
@@ -36,8 +49,20 @@ restart_message() {
 
 start() {
 	local JVM_FLAGS="$(jvm_flags)"
+	local SERVER=""
+	if test -n "$FORGE_VERSION"
+		then SERVER="@$(echo libraries/net/minecraftforge/forge/$FORGE_VERSION*/unix_args.txt)"
+	else
+		if test -z "$JAR" && test $(ls *.jar | wc -l) -eq 1
+			then JAR=*.jar # gosh I hope it doesn't have a whitespace character
+		elif ! ls "$JAR"
+			then die jar $JAR could not be found
+		fi
+		SERVER="--jar $JAR"
+	fi
+
 	set -x
-	exec "$JAVA" $JVM_FLAGS $JAVA_ARGS ${JAR:+-jar $JAR} $SERVER_ARGS $@
+	exec_java $JVM_FLAGS $JAVA_ARGS $SERVER $SERVER_ARGS $@
 	set +x
 }
 while test $# -gt 0 ; do
@@ -54,27 +79,31 @@ while test $# -gt 0 ; do
 			exec dtach -A dtach.sock $0 $@
 			;;
 		--mem)
-			shift
+			shift; set -u
 			export MEM="$1"
+			shift; set +u
 			;;
 		--jar)
-			shift
+			shift; set -u
 			export JAR="$1"
+			shift; set +u
 			;;
-		--forge)
-			shift
-			export JAR=""
-			add_java_args "@`echo libraries/net/minecraftforge/forge/*/unix_args.txt`"
+		--forge-version)
+			shift; set -u
+			export FORGE_VERSION="$1"
+			shift; set +u
 			;;
 		--openjdk-version)
-			shift
+			shift; set -u
 			export OPENJDK_VERSION="$1"
+			shift; set +u
 			;;
 		--)
 			shift
 			break
 			;;
 		*)
+			warn unrecognized option: $1
 			break
 			;;
 	esac
