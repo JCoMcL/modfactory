@@ -6,3 +6,4 @@ third-party/**
 !third-party/unpack.sh
 AGENTS.md
 CLAUDE.md
+prompts

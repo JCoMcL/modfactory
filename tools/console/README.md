@@ -1,29 +1,13 @@
 # Console tool
 
-`console.sh` talks to a server created by `tools/server/server.sh`. It does not
-start, stop, or reset the server.
+`sendcmd.sh` talks to a server created by `tools/server/server.sh` over RCON.
 
 ```bash
-# Interactive console. Detach with Ctrl-\.
-tools/console/console.sh attach dev
+# Send a command to the "dev" instance.
+tools/console/sendcmd.sh --instance dev datapack list
 
-# Send a command. Uses RCON when the instance has it enabled, otherwise dtach.
-tools/console/console.sh send dev "datapack list"
-
-# Force RCON (requires enable-rcon=true).
-tools/console/console.sh rcon dev "list"
+# Send a command to the whichever instance is currently running, there will usually only be one
+tools/console/console.sh rcon 'tp @e[type=minecraft:squid] jcomcl'
 ```
 
-When RCON is enabled, `send` and `rcon` print the command output. When only
-dtach is available, `send` sends the command but cannot print its output; use
-`attach` or `tools/server/server.sh logs dev -f` to see the result.
-
-Enable RCON when creating an instance:
-
-```bash
-tools/server/server.sh create dev --rcon
-```
-
-or set `"rcon": true` in the template's `template.json`.
-
-`rcon.py` is a small standard-library-only RCON client used by `console.sh`.
+`rcon.py` is a small standard-library-only RCON client used by `sendcmd.sh`.
