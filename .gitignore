@@ -2,5 +2,7 @@ vineflower-1.12.0.jar
 servers/instances/
 .servers/
 tutorials/*.wikitext
+third-party/**
+!third-party/unpack.sh
 AGENTS.md
 CLAUDE.md
