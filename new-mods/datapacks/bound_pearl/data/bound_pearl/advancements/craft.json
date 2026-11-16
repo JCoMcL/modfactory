@@ -1,0 +1,13 @@
+{
+  "criteria": {
+    "craft_bound_pearl": {
+      "trigger": "minecraft:recipe_crafted",
+      "conditions": {
+        "recipe_id": "bound_pearl:bound_pearl"
+      }
+    }
+  },
+  "rewards": {
+    "function": "bound_pearl:craft"
+  }
+}
