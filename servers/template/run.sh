@@ -15,6 +15,15 @@ export JAR=${SERVER_JAR:-server.jar}
 
 JAVA=/opt/openjdk-bin-$OPENJDK_VERSION/bin/java
 
+add_java_args() {
+	export JAVA_ARGS="$JAVA_ARGS $@"
+}
+
+export SERVER_ARGS=${SERVER_ARGS:-nogui}
+add_server_args() {
+	export SERVER_ARGS="$SERVER_ARGS $@"
+}
+
 restart_message() {
 	echo
 	echo "Server is Restarting"
@@ -26,10 +35,11 @@ restart_message() {
 }
 
 start() {
-	JVM_FLAGS="`jvm_flags`"
-	exec "$JAVA" $JVM_FLAGS ${JAR:+-jar $JAR} $@
+	local JVM_FLAGS="$(jvm_flags)"
+	set -x
+	exec "$JAVA" $JVM_FLAGS $JAVA_ARGS ${JAR:+-jar $JAR} $SERVER_ARGS $@
+	set +x
 }
-
 while test $# -gt 0 ; do
 	case "$1" in
 		--restart|-r)
@@ -51,9 +61,15 @@ while test $# -gt 0 ; do
 			shift
 			export JAR="$1"
 			;;
+		--forge)
+			shift
+			export JAR=""
+			add_java_args "@`echo libraries/net/minecraftforge/forge/*/unix_args.txt`"
+			;;
 		--openjdk-version)
 			shift
 			export OPENJDK_VERSION="$1"
+			;;
 		--)
 			shift
 			break
@@ -64,4 +80,4 @@ while test $# -gt 0 ; do
 	esac
 done
 
-start
+start $@
