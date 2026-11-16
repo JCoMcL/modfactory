@@ -1,3 +1,6 @@
 [submodule "fabric-template"]
 	path = templates/fabric
 	url = https://github.com/FabricMC/fabric-example-mod.git
+[submodule "templates/multiloader"]
+	path = templates/multiloader
+	url = https://github.com/jaredlll08/MultiLoader-Template.git
