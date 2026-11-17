@@ -156,7 +156,7 @@ link_cached() {
 
 copy_template() {
   local dest="$1" src rel target
-  [[ ! -e "$dest" ]] || die "instance already exists: $dest"
+  [[ -e "$dest" ]] && warn "instance already exists: $dest. Deleting..." && rm -r "$dest"
   [[ -d "$TEMPLATE" ]] || die "template not found: $TEMPLATE"
   [[ -f "$TEMPLATE/run.sh" ]] || die "template is missing run.sh"
   mkdir -p "$dest"

@@ -58,7 +58,7 @@ start() {
 		elif ! ls "$JAR"
 			then die jar $JAR could not be found
 		fi
-		SERVER="--jar $JAR"
+		SERVER="-jar $JAR"
 	fi
 
 	set -x
