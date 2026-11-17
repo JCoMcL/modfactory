@@ -9,14 +9,13 @@
 # linked into the instance. Mods and datapacks are symlinked, not copied, so
 # in-place rebuilds are picked up on the next start.
 #
-# servers/template/run.sh is the deployment launcher. This script does not put
-# template or instance logic into it; launcher flags (--mem, --dtach, --restart,
-# --jar, --openjdk-version) are forwarded when the instance is started.
+# servers/template/run.sh is the deployment launcher. --start separates server
+# options from run.sh options; --restart before it means restart the server now.
 #
-#   tools/server/server.sh --create pearltest --add-datapacks new-mods/datapacks/bound_pearl/ --start
-#   tools/server/server.sh --create forge-modpack --forge --add-mods third-party/*.jar
+#   tools/server/server.sh --create pearltest --version 1.20.1 --add-datapacks new-mods/datapacks/bound_pearl/ --start
+#   tools/server/server.sh --create forge-modpack --version 1.20.1 --forge --add-mods third-party/*.jar
 #   tools/server/server.sh forge-modpack --add-mods new-mods/forge/my-test-mod.jar --restart
-#   tools/server/server.sh --create vanilla-server --start --mem 4G --dtach --restart
+#   tools/server/server.sh vanilla-server --start --mem 4G --dtach --restart
 #
 set -euo pipefail
 
@@ -29,7 +28,6 @@ DOWNLOAD_SERVER="$SCRIPT_DIR/download-server.sh"
 RCON_PY="$REPO_ROOT/tools/console/rcon.py"
 INVOKE_PWD="$PWD"
 
-DEFAULT_MC_VERSION="${MINECRAFT_VERSION:-1.20.1}"
 OPENJDK_VERSION="${OPENJDK_VERSION:-17}"
 
 info() { printf 'server: %s\n' "$*" >&2; }
@@ -38,24 +36,24 @@ die()  { printf 'server: error: %s\n' "$*" >&2; exit 1; }
 
 usage() {
   cat >&2 <<'EOF'
-Usage: tools/server/server.sh [options] [instance]
+Usage: tools/server/server.sh [options] [instance] [--start [run.sh options]]
 
 Create servers/instances/<name> from servers/template, attach mods or
 datapacks, and start or stop it.
 
 Options:
   --create <name>            Copy the template into a new instance
+  --version <version>        Minecraft version (required with --create only)
   --vanilla                  Vanilla server (default for --create)
   --forge                    Forge server
   --fabric                   Fabric server
-  --mc-version <version>     Minecraft version (default: 1.20.1)
-  --forge-version <version>  Forge version (default: cached install, else recommended)
+  --forge-version <version>  Exact non-default Forge version (optional; before --start)
   --add-mods <path>...       Symlink mod jars into mods/
   --add-datapacks <path>...  Symlink datapacks into the world datapacks folder
-  --start                    Start the instance
-  --restart                  Stop if running, then start. Reuses the last
-                             --mem/--dtach flags and passes --restart to run.sh.
-  --stop                     Stop the instance
+  --start                    Start the instance; subsequent args go to run.sh
+  --restart                  Before --start: stop if running, then start once.
+                             After --start: run.sh's automatic restart loop.
+  --stop                     Stop the instance (no run.sh options)
   -h, --help
 
 Paths may be a single jar, zip, or pack directory, or a directory of them.
@@ -64,14 +62,21 @@ into <level-name>/datapacks before launch so Minecraft can auto-enable them.
 World symlinks are absolute and listed in the instance's allowed_symlinks.txt,
 which 1.20+ requires.
 
-Arguments run.sh understands are forwarded on --start / --restart:
-  --mem <size>  --dtach  --jar <path>  --openjdk-version <n>  --restart
+Before --start, --forge-version selects an exact Forge version; if omitted,
+the default installed/recommended version is used. After --start,
+--forge-version is forwarded to run.sh and is interpreted as a prefix.
+Likewise, --restart before --start means restart now; after --start it enables
+run.sh's automatic restart loop.
 
 Examples:
-  tools/server/server.sh --create pearltest --add-datapacks new-mods/datapacks/bound_pearl/ --start
-  tools/server/server.sh --create forge-modpack --forge --add-mods third-party/*.jar
+  tools/server/server.sh --create pearltest --version 1.20.1 --add-datapacks new-mods/datapacks/bound_pearl/ --start
+  tools/server/server.sh --create forge-modpack --version 1.20.1 --forge --add-mods third-party/*.jar
+  tools/server/server.sh forge-modpack --forge-version 47.4.29 --start
+  tools/server/server.sh forge-modpack --start --forge-version 1.20.1
+  tools/server/server.sh forge-modpack --restart
   tools/server/server.sh forge-modpack --add-mods new-mods/forge/my-test-mod.jar --restart
-  tools/server/server.sh --create vanilla-server --start --mem 4G --dtach --restart
+  tools/server/server.sh --create vanilla-server --version 1.20.1 --start --mem 4G --dtach --restart
+  tools/server/server.sh vanilla-server --start --mem 4G --dtach --restart
 EOF
 }
 
@@ -129,11 +134,25 @@ read_metadata() {
 }
 
 save_run_args() {
-  if [[ "$#" -eq 0 ]]; then
+  local arg skip_next=0
+  local -a persisted=()
+  for arg in "$@"; do
+    if [[ "$skip_next" -eq 1 ]]; then
+      skip_next=0
+      continue
+    fi
+    # These are per-launch selectors/modes, not persistent launcher settings.
+    case "$arg" in
+      --restart|-r) continue ;;
+      --forge-version) skip_next=1; continue ;;
+    esac
+    persisted+=("$arg")
+  done
+  if [[ ${#persisted[@]} -eq 0 ]]; then
     rm -f "$(run_args_file)"
     return 0
   fi
-  printf '%s\n' "$@" > "$(run_args_file)"
+  printf '%s\n' "${persisted[@]}" > "$(run_args_file)"
 }
 
 load_saved_run_args() {
@@ -141,8 +160,16 @@ load_saved_run_args() {
   local file
   file="$(run_args_file)"
   [[ -f "$file" ]] || return 0
-  local line
+  local line skip_next=0
   while IFS= read -r line || [[ -n "$line" ]]; do
+    if [[ "$skip_next" -eq 1 ]]; then
+      skip_next=0
+      continue
+    fi
+    case "$line" in
+      --restart|-r) continue ;;
+      --forge-version) skip_next=1; continue ;;
+    esac
     [[ -n "$line" ]] && saved_run_args+=("$line")
   done < "$file"
 }
@@ -483,15 +510,6 @@ stop_instance() {
   info "instance stopped"
 }
 
-args_contain() {
-  local needle="$1" arg
-  shift
-  for arg in "$@"; do
-    [[ "$arg" == "$needle" ]] && return 0
-  done
-  return 1
-}
-
 start_instance() {
   local -a launch=()
   local game_port listeners
@@ -504,13 +522,12 @@ start_instance() {
     setup_loader
   fi
   refresh_symlink_allowlist
-  launch=("${effective_run_args[@]+"${effective_run_args[@]}"}")
-  if [[ "$action" == restart ]] && ! args_contain --restart "${launch[@]+"${launch[@]}"}"; then
-    launch+=(--restart)
+  if [[ "$server_type" == forge ]]; then
+    # run.sh matches this full prefix against <minecraft>-<forge>/unix_args.txt.
+    # A caller may append its own --forge-version after the action to override it.
+    launch+=(--forge-version "${mc_version}-${forge_version}")
   fi
-  if [[ "$server_type" == forge ]] && ! args_contain --forge "${launch[@]+"${launch[@]}"}"; then
-    launch+=(--forge)
-  fi
+  launch+=("${effective_run_args[@]+"${effective_run_args[@]}"}")
   game_port="$(read_prop server-port "$instance_dir/server.properties")"
   game_port="${game_port:-25565}"
   listeners="$(port_listeners "$game_port")"
@@ -519,11 +536,10 @@ start_instance() {
   fi
   save_run_args "${effective_run_args[@]+"${effective_run_args[@]}"}"
   export MINECRAFT_VERSION="$mc_version"
-  export FORGE_VERSION="${forge_version:-}"
   if [[ "$server_type" == forge ]]; then
-    export FORGE=1
+    export FORGE_VERSION="${mc_version}-${forge_version}"
   else
-    export FORGE=0
+    unset FORGE_VERSION || true
   fi
   export OPENJDK_VERSION
   info "starting $instance_name ($server_type $mc_version)"
@@ -550,6 +566,7 @@ take_paths() {
 
 do_create=0
 action=""
+start_seen=0
 instance=""
 server_type=""
 type_set=0
@@ -560,7 +577,6 @@ forge_version_set=0
 mod_paths=()
 datapack_paths=()
 user_run_args=()
-forward=0
 
 if [[ $# -eq 0 ]]; then
   usage
@@ -569,10 +585,9 @@ fi
 
 args=("$@")
 while [[ ${#args[@]} -gt 0 ]]; do
-  if [[ "$forward" -eq 1 ]]; then
-    user_run_args+=("${args[0]}")
-    args=("${args[@]:1}")
-    continue
+  if [[ "$start_seen" -eq 1 ]]; then
+    user_run_args+=("${args[@]}")
+    break
   fi
   case "${args[0]}" in
     -h|--help)
@@ -580,8 +595,7 @@ while [[ ${#args[@]} -gt 0 ]]; do
       exit 0
       ;;
     --)
-      forward=1
-      args=("${args[@]:1}")
+      die "-- is only valid after --start"
       ;;
     --create|create)
       do_create=1
@@ -592,13 +606,12 @@ while [[ ${#args[@]} -gt 0 ]]; do
       ;;
     --start|start)
       [[ "$action" != stop ]] || die "conflicting actions: stop and start"
-      if [[ "$action" != restart ]]; then
-        action=start
-      fi
+      [[ "$action" == restart ]] || action=start
+      start_seen=1
       args=("${args[@]:1}")
       ;;
     --stop|stop)
-      [[ -z "$action" || "$action" == stop ]] || die "conflicting actions: $action and stop"
+      [[ "$action" != restart ]] || die "conflicting actions: restart and stop"
       action=stop
       args=("${args[@]:1}")
       ;;
@@ -608,6 +621,7 @@ while [[ ${#args[@]} -gt 0 ]]; do
       args=("${args[@]:1}")
       ;;
     --vanilla)
+      [[ "$forge_version_set" -eq 0 ]] || die "--forge-version requires a Forge instance"
       server_type=vanilla
       type_set=1
       args=("${args[@]:1}")
@@ -618,15 +632,25 @@ while [[ ${#args[@]} -gt 0 ]]; do
       args=("${args[@]:1}")
       ;;
     --fabric)
+      [[ "$forge_version_set" -eq 0 ]] || die "--forge-version requires a Forge instance"
       server_type=fabric
       type_set=1
       args=("${args[@]:1}")
       ;;
-    --mc-version|--minecraft-version|--version)
+    --version)
       [[ ${#args[@]} -ge 2 ]] || die "${args[0]} requires a value"
       mc_version="${args[1]}"
       mc_version_set=1
       args=("${args[@]:2}")
+      ;;
+    --version=*)
+      mc_version="${args[0]#*=}"
+      [[ -n "$mc_version" ]] || die "--version requires a value"
+      mc_version_set=1
+      args=("${args[@]:1}")
+      ;;
+    --mc-version|--minecraft-version|--mc-version=*|--minecraft-version=*)
+      die "use --version; it is only valid with --create"
       ;;
     --forge-version)
       [[ ${#args[@]} -ge 2 ]] || die "--forge-version requires a value"
@@ -676,12 +700,34 @@ done
 validate_name "$instance"
 if [[ "$mc_version_set" -eq 1 ]]; then
   validate_version "Minecraft version" "$mc_version"
+  [[ "$do_create" -eq 1 ]] || die "--version is only valid with --create"
+elif [[ "$do_create" -eq 1 ]]; then
+  die "--create requires --version <minecraft-version>"
 fi
 if [[ "$forge_version_set" -eq 1 ]]; then
   validate_version "forge version" "$forge_version"
 fi
+for ((arg_index = 0; arg_index < ${#user_run_args[@]}; arg_index++)); do
+  arg="${user_run_args[$arg_index]}"
+  case "$arg" in
+    --version|--version=*|--mc-version|--mc-version=*|--minecraft-version|--minecraft-version=*)
+      die "--version is only valid with --create"
+      ;;
+    --forge-version)
+      (( arg_index + 1 < ${#user_run_args[@]} )) || die "run.sh --forge-version requires a prefix"
+      validate_version "Forge version prefix" "${user_run_args[$((arg_index + 1))]}"
+      arg_index=$((arg_index + 1))
+      ;;
+  esac
+done
 if [[ "$type_set" -eq 1 && "$server_type" != vanilla && "$server_type" != forge && "$server_type" != fabric ]]; then
   die "unsupported server type: $server_type"
+fi
+if [[ "$forge_version_set" -eq 1 && "$type_set" -eq 1 && "$server_type" != forge ]]; then
+  die "--forge-version requires --forge"
+fi
+if [[ "$action" == stop && ${#user_run_args[@]} -gt 0 ]]; then
+  die "run.sh options cannot be used with --stop"
 fi
 
 instance_name="$instance"
@@ -690,11 +736,13 @@ mkdir -p "$INSTANCES"
 
 if [[ "$do_create" -eq 1 ]]; then
   if [[ -z "$server_type" ]]; then
-    server_type=vanilla
+    if [[ "$forge_version_set" -eq 1 ]]; then
+      server_type=forge
+    else
+      server_type=vanilla
+    fi
   fi
-  if [[ "$mc_version_set" -eq 0 ]]; then
-    mc_version="$DEFAULT_MC_VERSION"
-  fi
+  [[ "$server_type" != forge || "$forge_version" != "$mc_version" ]] || die "server.sh --forge-version expects an exact Forge version; omit it to use the default"
   info "creating $server_type instance $instance_name"
   copy_template "$instance_dir"
   instance_dir="$(readlink -f "$instance_dir")"
@@ -708,16 +756,32 @@ else
   saved_mc=""
   saved_forge=""
   read_metadata
-  if [[ "$type_set" -eq 0 ]]; then
+  if [[ "$forge_version_set" -eq 1 && "$type_set" -eq 0 ]]; then
+    server_type=forge
+  elif [[ "$type_set" -eq 0 ]]; then
     server_type="${saved_type:-vanilla}"
   fi
-  if [[ "$mc_version_set" -eq 0 ]]; then
-    mc_version="${saved_mc:-$DEFAULT_MC_VERSION}"
+  if [[ -z "$saved_mc" ]]; then
+    die "instance metadata is missing minecraft_version: $instance_dir/.modfactory"
   fi
+  mc_version="$saved_mc"
   if [[ "$forge_version_set" -eq 0 ]]; then
     forge_version="${saved_forge:-}"
   fi
-  if [[ "$type_set" -eq 1 || "$mc_version_set" -eq 1 || "$forge_version_set" -eq 1 ]]; then
+  if [[ "$type_set" -eq 0 && "$server_type" != forge && -n "$forge_version" ]]; then
+    warn "metadata says $server_type but contains forge_version=$forge_version; treating the instance as Forge"
+    server_type=forge
+    # Older metadata stored the run.sh Minecraft-prefix selector here. Resolve
+    # the actual installed version using the normal default-selection path.
+    [[ "$forge_version" != "$mc_version" ]] || forge_version=""
+  fi
+  if [[ "$server_type" != forge && "$forge_version_set" -eq 0 ]]; then
+    forge_version=""
+  fi
+  if [[ "$forge_version_set" -eq 1 && "$server_type" == forge && "$forge_version" == "$mc_version" ]]; then
+    die "server.sh --forge-version expects an exact Forge version; omit it to use the default"
+  fi
+  if [[ "$type_set" -eq 1 || "$forge_version_set" -eq 1 || "$server_type" != "$saved_type" || "$forge_version" != "$saved_forge" ]]; then
     if [[ -n "$saved_type" && "$server_type" != "$saved_type" && -f "$instance_dir/world/level.dat" ]]; then
       warn "changing type of an instance that already has a world ($saved_type -> $server_type)"
     fi
@@ -745,7 +809,7 @@ case "$action" in
     if [[ ${#user_run_args[@]} -gt 0 ]]; then
       die "launcher arguments require --start or --restart"
     fi
-    if [[ "$do_create" -eq 0 && ${#mod_paths[@]} -eq 0 && ${#datapack_paths[@]} -eq 0 && "$type_set" -eq 0 ]]; then
+    if [[ "$do_create" -eq 0 && ${#mod_paths[@]} -eq 0 && ${#datapack_paths[@]} -eq 0 && "$type_set" -eq 0 && "$forge_version_set" -eq 0 ]]; then
       usage
       exit 2
     fi

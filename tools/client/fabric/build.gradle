@@ -1,0 +1,32 @@
+plugins {
+    id 'net.fabricmc.fabric-loom-remap'
+}
+
+def mcVersion = providers.gradleProperty('minecraft_version').getOrElse('1.20.1')
+def loaderVersion = providers.gradleProperty('loader_version').getOrElse('0.20.1')
+def runDirPath = providers.gradleProperty('run_dir').getOrElse(layout.projectDirectory.dir('run').asFile.absolutePath)
+def clientHost = providers.gradleProperty('client_host').getOrElse('127.0.0.1')
+def clientPort = providers.gradleProperty('client_port').getOrElse('25565')
+def clientUsername = providers.gradleProperty('client_username').getOrElse('Player')
+
+dependencies {
+    minecraft "com.mojang:minecraft:${mcVersion}"
+    mappings loom.officialMojangMappings()
+    modImplementation "net.fabricmc:fabric-loader:${loaderVersion}"
+}
+
+tasks.register('runProductionClient', net.fabricmc.loom.task.prod.ClientProductionRunTask) {
+    minecraftVersion.set(mcVersion)
+    runDir.set(file(runDirPath))
+    programArgs.addAll('--quickPlayMultiplayer', "${clientHost}:${clientPort}", '--username', clientUsername)
+    javaLauncher.set(javaToolchains.launcherFor {
+        languageVersion = JavaLanguageVersion.of(17)
+    })
+}
+
+// This project is a client launcher helper, not a distributable mod.
+tasks.configureEach { task ->
+    if (task.name in ['jar', 'remapJar', 'sourcesJar', 'remapSourcesJar']) {
+        task.enabled = false
+    }
+}

@@ -1,0 +1,56 @@
+plugins {
+    id 'java'
+    id 'net.neoforged.moddev.legacyforge'
+}
+
+def mcVersion = providers.gradleProperty('minecraft_version').getOrElse('1.20.1')
+def forgeVersion = providers.gradleProperty('forge_version').getOrElse('47.4.29')
+def runDirPath = providers.gradleProperty('run_dir').getOrElse(layout.projectDirectory.dir('run').asFile.absolutePath)
+def modsDirPath = providers.gradleProperty('mods_dir').getOrElse(layout.projectDirectory.dir('mods').asFile.absolutePath)
+def modsRepoPath = providers.gradleProperty('mods_repo').getOrElse(layout.projectDirectory.dir('mods-repo').asFile.absolutePath)
+def clientHost = providers.gradleProperty('client_host').getOrElse('127.0.0.1')
+def clientPort = providers.gradleProperty('client_port').getOrElse('25565')
+def clientUsername = providers.gradleProperty('client_username').getOrElse('Player')
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(17)
+    }
+}
+
+repositories {
+    // launch.sh stages instance jars here so MDG can remap them as modules.
+    maven {
+        url = uri(modsRepoPath)
+    }
+}
+
+def instanceModFiles = fileTree(dir: modsDirPath, include: '*.jar').files.sort { it.name }
+def modArtifactId = { File modJar ->
+    def digest = java.security.MessageDigest.getInstance('SHA-1')
+    modJar.withInputStream { input ->
+        byte[] buffer = new byte[8192]
+        int count
+        while ((count = input.read(buffer)) != -1) {
+            digest.update(buffer, 0, count)
+        }
+    }
+    "instance-mod-${java.util.HexFormat.of().formatHex(digest.digest())}"
+}
+dependencies {
+    instanceModFiles.each { modJar ->
+        modRuntimeOnly "local.modfactory:${modArtifactId(modJar)}:1"
+    }
+}
+
+legacyForge {
+    version = "${mcVersion}-${forgeVersion}"
+
+    runs {
+        client {
+            client()
+            gameDirectory = file(runDirPath)
+            programArguments.addAll('--quickPlayMultiplayer', "${clientHost}:${clientPort}", '--username', clientUsername)
+        }
+    }
+}
