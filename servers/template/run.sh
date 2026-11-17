@@ -47,11 +47,29 @@ restart_message() {
 	echo
 }
 
+take_first_and_complain() {
+	local out=""
+	while read line; do
+		if test -z "$out"; then
+			out=$line
+			echo $out
+		else
+			warn "multiple values matched by pattern. Choosing $out arbitrarily!"
+			break
+		fi
+	done
+}
+
 start() {
 	local JVM_FLAGS="$(jvm_flags)"
 	local SERVER=""
 	if test -n "$FORGE_VERSION"
-		then SERVER="@$(echo libraries/net/minecraftforge/forge/$FORGE_VERSION*/unix_args.txt)"
+		then SERVER="@$(
+			find libraries/net/minecraftforge/forge -name unix_args.txt |
+			grep . | # error if empty
+			sort -nr | # choose the highest version number
+			take_first_and_complain
+		)"
 	else
 		if test -z "$JAR" && test $(ls *.jar | wc -l) -eq 1
 			then JAR=*.jar # gosh I hope it doesn't have a whitespace character
