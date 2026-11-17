@@ -10,3 +10,6 @@ AGENTS.md: CLANKERS.md
 CLAUDE.md: CLANKERS.md
 	ln -sfr $< $@
 
+.PHONY: clean
+clean:
+	cd servers/template && rm -rf defaultconfigs logs world banned-ips.json banned-players.json ops.json usercache.json whitelist.json
